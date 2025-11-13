@@ -51,16 +51,22 @@ class Block:
         return abs(self.row - other.row) + abs(self.col - other.col)
 
     @staticmethod
-    def merge(blocks: list[Block]) -> tuple[bool, list[Block]]:
+    def blocks_by_color(blocks: list[Block]) -> dict[int, list[Block]]:
         blocks_by_color = defaultdict(list[Block])
         for block in blocks:
             blocks_by_color[block.color].append(block)
+        return blocks_by_color
+
+    @staticmethod
+    def merge(blocks: frozenset[Block]) -> tuple[bool, frozenset[Block]]:
+        blocks_by_color = Block.blocks_by_color(blocks)
 
         was_settled = True
         new_blocks: list[Block] = []
         for bs in blocks_by_color.values():
             blocks_to_merge_indices = set()
             if len(bs) == 1:
+                new_blocks.append(bs[0])
                 continue
             for i in range(len(bs) - 1):
                 for j in range(i + 1, len(bs)):
@@ -72,12 +78,32 @@ class Block:
                 if i in blocks_to_merge_indices:
                     continue
                 new_blocks.append(block)
-        return was_settled, new_blocks
+        return was_settled, frozenset(new_blocks)
+
+    @staticmethod
+    def heuristics(blocks: list[Block]) -> int:
+        """Not over-estimating estimate"""
+        if len(blocks) == 0:
+            return 0
+        h = 1
+        blocks_by_color = Block.blocks_by_color(blocks)
+        for bs in blocks_by_color.values():
+            color_count = len(bs)
+            if color_count == 1:
+                return 9999
+            if 2 == color_count:
+                h_dist = abs(bs[0].col - bs[1].col)
+                h += max(0, h_dist - 1)
+            if color_count == 3:
+                x_coords = [b.col for b in bs]
+                h_dist = max(x_coords) - min(x_coords)
+                h += max(0, h_dist - 2)
+        return h
 
     @staticmethod
     def from_str(
         s: str, wall_char: str = "X", empty_char: str = ".", new_line_char="/"
-    ) -> tuple[Block]:
+    ) -> frozenset[Block]:
         assigned_chars = []
         blocks = []
         for row, row_str in enumerate(s.split(new_line_char)):
@@ -88,7 +114,7 @@ class Block:
                     assigned_chars.append(char)
                 color_index = assigned_chars.index(char) + 1
                 blocks.append(Block(color_index, row, col))
-        return tuple(blocks)
+        return frozenset(blocks)
 
 
 class EmptyColumn:
@@ -99,7 +125,7 @@ class EmptyColumn:
         assert self.row_end > self.row_start
         self.length = self.row_end - self.row_start
 
-    def fall(self, blocks: tuple[Block]) -> tuple[bool, tuple[Block]]:
+    def fall(self, blocks: frozenset[Block]) -> tuple[bool, frozenset[Block]]:
         if self.length == 1 or len(blocks) == 0:
             return True, blocks
         arr = sorted((block.row, block.color) for block in blocks)
@@ -109,10 +135,10 @@ class EmptyColumn:
         )
 
         was_settled = arr[0][0] == new_blocks[0].row
-        return was_settled, new_blocks
+        return was_settled, frozenset(new_blocks)
 
-    def corresponding_blocks(self, blocks: list[Block]) -> tuple[Block]:
-        return tuple(
+    def corresponding_blocks(self, blocks: list[Block]) -> frozenset[Block]:
+        return frozenset(
             block
             for block in blocks
             if block.col == self.col and self.row_start <= block.row < self.row_end
@@ -120,8 +146,8 @@ class EmptyColumn:
 
     @staticmethod
     def columns_fall(
-        columns: list[EmptyColumn], blocks: list[Block]
-    ) -> tuple[bool, list[Block]]:
+        columns: list[EmptyColumn], blocks: frozenset[Block]
+    ) -> tuple[bool, frozenset[Block]]:
         bs = []
         fall_settled = True
         for empty_col in columns:
@@ -129,7 +155,7 @@ class EmptyColumn:
             col_fall_settled, col_new_blocks = empty_col.fall(col_blocks)
             fall_settled = col_fall_settled and fall_settled
             bs.extend(col_new_blocks)
-        return fall_settled, bs
+        return fall_settled, frozenset(bs)
 
 
 @dataclass(frozen=True)
@@ -138,10 +164,13 @@ class Move:
     col: int
     to_left: bool
 
-    def __repr__(self):
+    def __str__(self):
         if self.to_left:
             return f"{self.row}{self.col}<"
         return f"{self.row}{self.col}>"
+
+    def __repr__(self):
+        return str(self)
 
     def original_position(self) -> tuple[int]:
         return (self.row, self.col)
@@ -158,7 +187,10 @@ class Move:
 @dataclass(frozen=True)
 class Level:
     walls: Walls
-    blocks: tuple[Block]
+    blocks: frozenset[Block]
+
+    # def __post_init__(self):
+    #     print(self)
 
     def __repr__(self):
         row_lists = []
@@ -172,7 +204,7 @@ class Level:
 
             row_lists.append(row_list)
         for block in self.blocks:
-            row_lists[block.row][block.col] = str(block.color)
+            row_lists[block.row][block.col] = chr(block.color + 96)
 
         return "\n".join("".join(row_list) for row_list in row_lists)
 
@@ -186,7 +218,6 @@ class Level:
 
         merge_settled = False
         while not merge_settled:
-            bs = []
             fall_settled = True
             fall_settled, bs = EmptyColumn.columns_fall(
                 self.walls.empty_columns, new_blocks
@@ -198,7 +229,7 @@ class Level:
             merge_settled, bs = Block.merge(bs)
             new_blocks = bs.copy()
 
-        return Level(self.walls, tuple(new_blocks))
+        return Level(self.walls, frozenset(new_blocks))
 
     def move(self, move: Move) -> Level:
         assert any(
@@ -234,10 +265,9 @@ class Level:
         return moves
 
     def children(self) -> dict[Level]:
-        return {
-            move: self._move(move)
-            for move in self.possible_moves()
-        }
+        if self.is_deadend():
+            return {}
+        return {move: self._move(move) for move in self.possible_moves()}
 
     def is_win(self):
         return len(self.blocks) == 0
@@ -254,7 +284,7 @@ class Level:
         return False
 
     def __hash__(self):
-        return hash((self.walls, self.blocks))
+        return hash(self.blocks)
 
     def __eq__(self, value: Level):
         return hash(self) == hash(value)
