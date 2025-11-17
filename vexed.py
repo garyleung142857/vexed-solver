@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from collections import Counter, defaultdict
+from collections import defaultdict
 from math import inf
 
 
@@ -64,8 +64,8 @@ class Block:
 
         was_settled = True
         new_blocks: list[Block] = []
+        blocks_to_merge = set()
         for bs in blocks_by_color.values():
-            blocks_to_merge_indices = set()
             if len(bs) == 1:
                 new_blocks.append(bs[0])
                 continue
@@ -73,10 +73,10 @@ class Block:
                 for j in range(i + 1, len(bs)):
                     if bs[i].distance_with(bs[j]) == 1:
                         was_settled = False
-                        blocks_to_merge_indices.add(i)
-                        blocks_to_merge_indices.add(j)
-            for i, block in enumerate(bs):
-                if i in blocks_to_merge_indices:
+                        blocks_to_merge.add(bs[i])
+                        blocks_to_merge.add(bs[j])
+            for block in bs:
+                if block in blocks_to_merge:
                     continue
                 new_blocks.append(block)
         return was_settled, new_blocks
@@ -89,16 +89,11 @@ class Block:
         h = 1
         blocks_by_color = Block.blocks_by_color(blocks)
         for bs in blocks_by_color.values():
-            color_count = len(bs)
-            if color_count == 1:
-                return inf
-            if 2 == color_count:
-                h_dist = abs(bs[0].col - bs[1].col)
-                h += max(0, h_dist - 1)
-            if color_count == 3:
-                x_coords = [b.col for b in bs]
-                h_dist = max(x_coords) - min(x_coords)
-                h += max(0, h_dist - 2)
+            x_coords = sorted(b.col for b in bs)
+            color_heuristics = max(x_coords[i + 1] - x_coords[i] for i in range(len(bs) - 1))
+            if color_heuristics <= 1:
+                continue
+            h += color_heuristics - 1
         return h
 
     @staticmethod
@@ -266,8 +261,6 @@ class Level:
         return moves
 
     def children(self) -> dict[Level]:
-        if self.is_deadend():
-            return {}
         return {move: self._move(move) for move in self.possible_moves()}
 
     def is_win(self):
@@ -278,9 +271,21 @@ class Level:
         early escape, return true if detected to be impossible
         returing False does not mean that the level is possible
         """
-        # check singleton
-        if any(v == 1 for v in Counter(b.color for b in self.blocks).values()):
-            return True
+
+        for bs in Block.blocks_by_color(self.blocks).values():
+            # check singleton
+            if len(bs) == 1:
+                return True
+            if len(bs) <= 3:
+                x_coords = sorted(
+                    b.col 
+                    for b in bs
+                    if b.row == len(self.walls.walls) - 1
+                )
+                if len(x_coords) < 2:
+                    continue
+                if any(self.walls.walls[-1][min(x_coords) + 1: max(x_coords)]):
+                    return True
 
         return False
 

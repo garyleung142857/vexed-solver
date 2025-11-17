@@ -16,7 +16,9 @@ class VexedSolver(AStar):
         return 1
 
     def neighbors(self, node: Level):
-        return tuple(node.children().values())
+        if node.is_deadend():
+            return []
+        return list(node.children().values())
 
     def is_goal_reached(self, current: Level, goal):
         return current.is_win()
@@ -41,7 +43,8 @@ class VexedSolver(AStar):
 
 
 if __name__ == "__main__":
-    level_str = ".hf...e./.eab..fh/.XXX..XX/.Xc....X/..b.a.c."
+    # level_str = ".hf...e./.eab..fh/.XXX..XX/.Xc....X/..b.a.c."
+    level_str = "..bac.X/.XXXX.a/...d..e/e..e..b/c.bc..g/bceXagd"
     level = Level.from_str(level_str)
     print(level)
     level_solver = VexedSolver(level)
