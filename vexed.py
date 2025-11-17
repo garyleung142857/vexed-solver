@@ -1,4 +1,5 @@
 from __future__ import annotations
+from copy import deepcopy
 from dataclasses import dataclass
 from collections import defaultdict
 from math import inf
@@ -9,7 +10,7 @@ class Walls:
         self.walls = walls
         self.width = len(self.walls[0])
         self.height = len(self.walls)
-        self.empty_columns: list[EmptyColumn] = []
+        self.empty_columns: list[tuple[int, int, int]] = []
         for col in range(self.width):
             empty_col_row_start: int = None
             for row in range(self.height + 1):
@@ -17,9 +18,8 @@ class Walls:
                 if is_wall == (empty_col_row_start is None):
                     continue
                 if is_wall:
-                    self.empty_columns.append(
-                        EmptyColumn(col, empty_col_row_start, row)
-                    )
+                    if row - empty_col_row_start > 1:
+                        self.empty_columns.append((col, empty_col_row_start, row))
                     empty_col_row_start = None
                 else:
                     empty_col_row_start = row
@@ -90,7 +90,9 @@ class Block:
         blocks_by_color = Block.blocks_by_color(blocks)
         for bs in blocks_by_color.values():
             x_coords = sorted(b.col for b in bs)
-            color_heuristics = max(x_coords[i + 1] - x_coords[i] for i in range(len(bs) - 1))
+            color_heuristics = max(
+                x_coords[i + 1] - x_coords[i] for i in range(len(bs) - 1)
+            )
             if color_heuristics <= 1:
                 continue
             h += color_heuristics - 1
@@ -113,51 +115,11 @@ class Block:
         return frozenset(blocks)
 
 
-class EmptyColumn:
-    def __init__(self, col: int, row_start: int, row_end: int):
-        self.col = col
-        self.row_start = row_start
-        self.row_end = row_end
-        assert self.row_end > self.row_start
-        self.length = self.row_end - self.row_start
-
-    def fall(self, blocks: list[Block]) -> tuple[bool, list[Block]]:
-        if self.length == 1 or len(blocks) == 0:
-            return True, blocks
-        arr = sorted((block.row, block.color) for block in blocks)
-        new_blocks = [
-            Block(el[1], self.length + i - len(blocks) + self.row_start, self.col)
-            for i, el in enumerate(arr)
-        ]
-
-        was_settled = arr[0][0] == new_blocks[0].row
-        return was_settled, new_blocks
-
-    def corresponding_blocks(self, blocks: list[Block]) -> list[Block]:
-        return [
-            block
-            for block in blocks
-            if block.col == self.col and self.row_start <= block.row < self.row_end
-        ]
-
-    @staticmethod
-    def columns_fall(
-        columns: list[EmptyColumn], blocks: list[Block]
-    ) -> tuple[bool, list[Block]]:
-        bs = []
-        fall_settled = True
-        for empty_col in columns:
-            col_blocks = empty_col.corresponding_blocks(blocks)
-            col_fall_settled, col_new_blocks = empty_col.fall(col_blocks)
-            fall_settled = col_fall_settled and fall_settled
-            bs.extend(col_new_blocks)
-        return fall_settled, bs
-
-
 @dataclass(frozen=True)
 class Move:
     row: int
     col: int
+    color: int
     to_left: bool
 
     def __str__(self):
@@ -180,13 +142,32 @@ class Move:
         return (self.row, self.col + d_col)
 
 
-@dataclass(frozen=True)
 class Level:
     walls: Walls
     blocks: frozenset[Block]
 
-    # def __post_init__(self):
-    #     print(self)
+    def __init__(
+        self, walls: Walls, blocks: frozenset[Block], list_repr: list[list[int]]
+    ):
+        self.walls = walls
+        self.blocks = blocks
+        if list_repr is None:
+            self.list_repr = self.to_nested_list()
+        else:
+            self.list_repr = list_repr
+        self.height = len(self.walls.walls)
+        self.width = len(self.walls.walls[0])
+
+    def to_nested_list(self) -> list[list[int]]:
+        level = [
+            [-1 if self.walls.walls[j][i] else 0 for j in range(len(self.walls.walls))]
+            for i in range(len(self.walls.walls[0]))
+        ]
+
+        for block in self.blocks:
+            level[block.col][block.row] = block.color
+
+        return level
 
     def __repr__(self):
         row_lists = []
@@ -205,27 +186,51 @@ class Level:
         return "\n".join("".join(row_list) for row_list in row_lists)
 
     def _move(self, move: Move) -> Level:
-        new_blocks = []
-        for block in self.blocks:
-            if (block.row, block.col) == move.original_position():
-                new_blocks.append(Block(block.color, *move.new_position()))
-            else:
-                new_blocks.append(block)
-
         merge_settled = False
+        list_repr = deepcopy(self.list_repr)
+        list_repr[move.col][move.row] = 0
+        list_repr[move.new_position()[1]][move.new_position()[0]] = move.color
         while not merge_settled:
             fall_settled = True
-            fall_settled, bs = EmptyColumn.columns_fall(
-                self.walls.empty_columns, new_blocks
-            )
+            for x, row_start, row_end in self.walls.empty_columns:
+                for i in range(row_start, row_end - 1):
+                    for j in range(row_end - 2, i - 1, -1):
+                        if list_repr[x][j] <= 0:
+                            continue
+                        if list_repr[x][j + 1] != 0:
+                            continue
+                        list_repr[x][j + 1] = list_repr[x][j]
+                        list_repr[x][j] = 0
+                        fall_settled = False
 
             if fall_settled and merge_settled:
                 break
 
-            merge_settled, bs = Block.merge(bs)
-            new_blocks = bs.copy()
+            to_be_merged: set[tuple[int, int]] = set()
 
-        return Level(self.walls, frozenset(new_blocks))
+            for x in range(self.width):
+                for y in range(self.height):
+                    if list_repr[x][y] <= 0:
+                        continue
+                    if y < self.height - 1 and list_repr[x][y] == list_repr[x][y + 1]:
+                        to_be_merged.add((x, y))
+                        to_be_merged.add((x, y + 1))
+                    if x < self.width - 1 and list_repr[x][y] == list_repr[x + 1][y]:
+                        to_be_merged.add((x, y))
+                        to_be_merged.add((x + 1, y))
+
+            merge_settled = len(to_be_merged) == 0
+            for x, y in to_be_merged:
+                list_repr[x][y] = 0
+
+        new_blocks: list[Block] = []
+        for x, col in enumerate(list_repr):
+            for y, color in enumerate(col):
+                if color <= 0:
+                    continue
+                new_blocks.append(Block(color, y, x))
+
+        return Level(self.walls, frozenset(new_blocks), list_repr)
 
     def move(self, move: Move) -> Level:
         assert any(
@@ -255,9 +260,9 @@ class Level:
 
         for block in self.blocks:
             if _left_vacant(block.row, block.col):
-                moves.append(Move(block.row, block.col, True))
+                moves.append(Move(block.row, block.col, block.color, True))
             if _right_vacant(block.row, block.col):
-                moves.append(Move(block.row, block.col, False))
+                moves.append(Move(block.row, block.col, block.color, False))
         return moves
 
     def children(self) -> dict[Level]:
@@ -277,14 +282,10 @@ class Level:
             if len(bs) == 1:
                 return True
             if len(bs) <= 3:
-                x_coords = [
-                    b.col 
-                    for b in bs
-                    if b.row == len(self.walls.walls) - 1
-                ]
+                x_coords = [b.col for b in bs if b.row == len(self.walls.walls) - 1]
                 if len(x_coords) < 2:
                     continue
-                if any(self.walls.walls[-1][min(x_coords) + 1: max(x_coords)]):
+                if any(self.walls.walls[-1][min(x_coords) + 1 : max(x_coords)]):
                     return True
 
         return False
@@ -302,4 +303,5 @@ class Level:
         return Level(
             walls=Walls.from_str(s, wall_char, new_line_char),
             blocks=Block.from_str(s, wall_char, empty_char, new_line_char),
+            list_repr=None,
         )

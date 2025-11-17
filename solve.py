@@ -44,7 +44,7 @@ class VexedSolver(AStar):
 
 if __name__ == "__main__":
     # level_str = ".hf...e./.eab..fh/.XXX..XX/.Xc....X/..b.a.c."
-    level_str = "..bac.X/.XXXX.a/...d..e/e..e..b/c.bc..g/bceXagd"
+    level_str = "b.XXXXa.aX/X.Xb..c.dX/X.XX..e.eX/Xb.ed.c.cg/XXXXe.X.ge/XXXXc.X.XX"
     level = Level.from_str(level_str)
     print(level)
     level_solver = VexedSolver(level)
