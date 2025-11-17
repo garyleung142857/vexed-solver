@@ -277,11 +277,11 @@ class Level:
             if len(bs) == 1:
                 return True
             if len(bs) <= 3:
-                x_coords = sorted(
+                x_coords = [
                     b.col 
                     for b in bs
                     if b.row == len(self.walls.walls) - 1
-                )
+                ]
                 if len(x_coords) < 2:
                     continue
                 if any(self.walls.walls[-1][min(x_coords) + 1: max(x_coords)]):
