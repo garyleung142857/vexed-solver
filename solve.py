@@ -1,5 +1,6 @@
 from astar import AStar
 from vexed import Level, Move, Block
+from math import inf
 
 
 class VexedSolver(AStar):
@@ -8,7 +9,7 @@ class VexedSolver(AStar):
 
     def heuristic_cost_estimate(self, current: Level, goal):
         if current.is_deadend():
-            return 9999
+            return inf
         return Block.heuristics(current.blocks)
 
     def distance_between(self, n1, n2):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from collections import Counter, defaultdict
+from math import inf
 
 
 class Walls:
@@ -58,7 +59,7 @@ class Block:
         return blocks_by_color
 
     @staticmethod
-    def merge(blocks: frozenset[Block]) -> tuple[bool, frozenset[Block]]:
+    def merge(blocks: list[Block]) -> tuple[bool, list[Block]]:
         blocks_by_color = Block.blocks_by_color(blocks)
 
         was_settled = True
@@ -78,7 +79,7 @@ class Block:
                 if i in blocks_to_merge_indices:
                     continue
                 new_blocks.append(block)
-        return was_settled, frozenset(new_blocks)
+        return was_settled, new_blocks
 
     @staticmethod
     def heuristics(blocks: list[Block]) -> int:
@@ -90,7 +91,7 @@ class Block:
         for bs in blocks_by_color.values():
             color_count = len(bs)
             if color_count == 1:
-                return 9999
+                return inf
             if 2 == color_count:
                 h_dist = abs(bs[0].col - bs[1].col)
                 h += max(0, h_dist - 1)
@@ -125,29 +126,29 @@ class EmptyColumn:
         assert self.row_end > self.row_start
         self.length = self.row_end - self.row_start
 
-    def fall(self, blocks: frozenset[Block]) -> tuple[bool, frozenset[Block]]:
+    def fall(self, blocks: list[Block]) -> tuple[bool, list[Block]]:
         if self.length == 1 or len(blocks) == 0:
             return True, blocks
         arr = sorted((block.row, block.color) for block in blocks)
-        new_blocks = tuple(
+        new_blocks = [
             Block(el[1], self.length + i - len(blocks) + self.row_start, self.col)
             for i, el in enumerate(arr)
-        )
+        ]
 
         was_settled = arr[0][0] == new_blocks[0].row
-        return was_settled, frozenset(new_blocks)
+        return was_settled, new_blocks
 
-    def corresponding_blocks(self, blocks: list[Block]) -> frozenset[Block]:
-        return frozenset(
+    def corresponding_blocks(self, blocks: list[Block]) -> list[Block]:
+        return [
             block
             for block in blocks
             if block.col == self.col and self.row_start <= block.row < self.row_end
-        )
+        ]
 
     @staticmethod
     def columns_fall(
-        columns: list[EmptyColumn], blocks: frozenset[Block]
-    ) -> tuple[bool, frozenset[Block]]:
+        columns: list[EmptyColumn], blocks: list[Block]
+    ) -> tuple[bool, list[Block]]:
         bs = []
         fall_settled = True
         for empty_col in columns:
@@ -155,7 +156,7 @@ class EmptyColumn:
             col_fall_settled, col_new_blocks = empty_col.fall(col_blocks)
             fall_settled = col_fall_settled and fall_settled
             bs.extend(col_new_blocks)
-        return fall_settled, frozenset(bs)
+        return fall_settled, bs
 
 
 @dataclass(frozen=True)
