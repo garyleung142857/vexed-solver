@@ -2,15 +2,18 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from collections import defaultdict
+from functools import lru_cache
 from math import inf
 
 
 class Walls:
+    __slots__ = ("walls", "width", "height", "empty_columns")
+
     def __init__(self, walls: tuple[tuple[bool]]):
         self.walls = walls
         self.width = len(self.walls[0])
         self.height = len(self.walls)
-        self.empty_columns: list[tuple[int, int, int]] = []
+        _empty_columns: list[tuple[int, int, int]] = []
         for col in range(self.width):
             empty_col_row_start: int = None
             for row in range(self.height + 1):
@@ -19,10 +22,11 @@ class Walls:
                     continue
                 if is_wall:
                     if row - empty_col_row_start > 1:
-                        self.empty_columns.append((col, empty_col_row_start, row))
+                        _empty_columns.append((col, empty_col_row_start, row))
                     empty_col_row_start = None
                 else:
                     empty_col_row_start = row
+        self.empty_columns = nested_list_to_nested_tuple(_empty_columns)
 
     def __hash__(self):
         return hash(self.walls)
@@ -40,79 +44,6 @@ class Walls:
         for row in s.split(new_line_char):
             rows.append(tuple(char == wall_char for char in row))
         return Walls(walls=tuple(rows))
-
-
-@dataclass(frozen=True)
-class Block:
-    color: int
-    row: int
-    col: int
-
-    def distance_with(self, other: Block):
-        return abs(self.row - other.row) + abs(self.col - other.col)
-
-    @staticmethod
-    def blocks_by_color(blocks: list[Block]) -> dict[int, list[Block]]:
-        blocks_by_color = defaultdict(list[Block])
-        for block in blocks:
-            blocks_by_color[block.color].append(block)
-        return blocks_by_color
-
-    @staticmethod
-    def merge(blocks: list[Block]) -> tuple[bool, list[Block]]:
-        blocks_by_color = Block.blocks_by_color(blocks)
-
-        was_settled = True
-        new_blocks: list[Block] = []
-        blocks_to_merge = set()
-        for bs in blocks_by_color.values():
-            if len(bs) == 1:
-                new_blocks.append(bs[0])
-                continue
-            for i in range(len(bs) - 1):
-                for j in range(i + 1, len(bs)):
-                    if bs[i].distance_with(bs[j]) == 1:
-                        was_settled = False
-                        blocks_to_merge.add(bs[i])
-                        blocks_to_merge.add(bs[j])
-            for block in bs:
-                if block in blocks_to_merge:
-                    continue
-                new_blocks.append(block)
-        return was_settled, new_blocks
-
-    @staticmethod
-    def heuristics(blocks: list[Block]) -> int:
-        """Not over-estimating estimate"""
-        if len(blocks) == 0:
-            return 0
-        h = 1
-        blocks_by_color = Block.blocks_by_color(blocks)
-        for bs in blocks_by_color.values():
-            x_coords = sorted(b.col for b in bs)
-            color_heuristics = max(
-                x_coords[i + 1] - x_coords[i] for i in range(len(bs) - 1)
-            )
-            if color_heuristics <= 1:
-                continue
-            h += color_heuristics - 1
-        return h
-
-    @staticmethod
-    def from_str(
-        s: str, wall_char: str = "X", empty_char: str = ".", new_line_char="/"
-    ) -> frozenset[Block]:
-        assigned_chars = []
-        blocks = []
-        for row, row_str in enumerate(s.split(new_line_char)):
-            for col, char in enumerate(row_str):
-                if char == wall_char or char == empty_char:
-                    continue
-                if char not in assigned_chars:
-                    assigned_chars.append(char)
-                color_index = assigned_chars.index(char) + 1
-                blocks.append(Block(color_index, row, col))
-        return frozenset(blocks)
 
 
 @dataclass(frozen=True)
@@ -142,52 +73,50 @@ class Move:
         return (self.row, self.col + d_col)
 
 
+@lru_cache
+def color_heuristics(x_coords: tuple[int]):
+    if len(x_coords) == 2:
+        return max(x_coords[1] - x_coords[0] - 1, 0)
+    dists = tuple(
+        max(x_coords[i + 1] - x_coords[i] - 1, 0) for i in range(len(x_coords) - 1)
+    )
+    h = dists[0] + dists[-1]
+    for dist, next_dist in zip(dists[:-1], dists[1:]):
+        h += min(dist, next_dist)
+    return h
+
+
+def nested_tuple_to_nested_list(tuple_repr: tuple[tuple[int]]) -> list[list[int]]:
+    return [list(inner) for inner in tuple_repr]
+
+
+def nested_list_to_nested_tuple(list_repr: list[list[int]]) -> tuple[tuple[int]]:
+    return tuple(tuple(inner) for inner in list_repr)
+
+
 class Level:
-    walls: Walls
-    blocks: frozenset[Block]
+    __slots__ = ("walls", "list_repr", "tuple_repr", "heuristics")
 
-    def __init__(
-        self, walls: Walls, blocks: frozenset[Block], list_repr: list[list[int]]
-    ):
+    def __init__(self, walls: Walls, tuple_repr: tuple[tuple[int]]):
         self.walls = walls
-        self.blocks = blocks
-        if list_repr is None:
-            self.list_repr = self.to_nested_list()
-        else:
-            self.list_repr = list_repr
-        self.height = len(self.walls.walls)
-        self.width = len(self.walls.walls[0])
-
-    def to_nested_list(self) -> list[list[int]]:
-        level = [
-            [-1 if self.walls.walls[j][i] else 0 for j in range(len(self.walls.walls))]
-            for i in range(len(self.walls.walls[0]))
-        ]
-
-        for block in self.blocks:
-            level[block.col][block.row] = block.color
-
-        return level
+        self.tuple_repr = tuple_repr
+        self.heuristics: int = self._heuristics()
 
     def __repr__(self):
-        row_lists = []
-        for row in range(self.walls.height):
-            row_list = []
-            for col in range(self.walls.width):
-                if self.walls.is_wall(row, col):
-                    row_list.append("#")
+        row_lists = [[] for _ in range(self.walls.height)]
+        for col in self.tuple_repr:
+            for i, cell in enumerate(col):
+                if cell == -1:
+                    row_lists[i].append("#")
+                elif cell == 0:
+                    row_lists[i].append(" ")
                 else:
-                    row_list.append(" ")
-
-            row_lists.append(row_list)
-        for block in self.blocks:
-            row_lists[block.row][block.col] = chr(block.color + 96)
+                    row_lists[i].append(chr(cell + 96))
 
         return "\n".join("".join(row_list) for row_list in row_lists)
 
-    def _move(self, move: Move) -> Level:
+    def _move(self, move: Move, list_repr: list[list[int]]) -> Level:
         merge_settled = False
-        list_repr = deepcopy(self.list_repr)
         list_repr[move.col][move.row] = 0
         list_repr[move.new_position()[1]][move.new_position()[0]] = move.color
         while not merge_settled:
@@ -195,9 +124,7 @@ class Level:
             for x, row_start, row_end in self.walls.empty_columns:
                 for i in range(row_start, row_end - 1):
                     for j in range(row_end - 2, i - 1, -1):
-                        if list_repr[x][j] <= 0:
-                            continue
-                        if list_repr[x][j + 1] != 0:
+                        if list_repr[x][j] == 0 or list_repr[x][j + 1] != 0:
                             continue
                         list_repr[x][j + 1] = list_repr[x][j]
                         list_repr[x][j] = 0
@@ -208,14 +135,20 @@ class Level:
 
             to_be_merged: set[tuple[int, int]] = set()
 
-            for x in range(self.width):
-                for y in range(self.height):
+            for x in range(self.walls.width):
+                for y in range(self.walls.height):
                     if list_repr[x][y] <= 0:
                         continue
-                    if y < self.height - 1 and list_repr[x][y] == list_repr[x][y + 1]:
+                    if (
+                        y < self.walls.height - 1
+                        and list_repr[x][y] == list_repr[x][y + 1]
+                    ):
                         to_be_merged.add((x, y))
                         to_be_merged.add((x, y + 1))
-                    if x < self.width - 1 and list_repr[x][y] == list_repr[x + 1][y]:
+                    if (
+                        x < self.walls.width - 1
+                        and list_repr[x][y] == list_repr[x + 1][y]
+                    ):
                         to_be_merged.add((x, y))
                         to_be_merged.add((x + 1, y))
 
@@ -223,75 +156,61 @@ class Level:
             for x, y in to_be_merged:
                 list_repr[x][y] = 0
 
-        new_blocks: list[Block] = []
-        for x, col in enumerate(list_repr):
-            for y, color in enumerate(col):
-                if color <= 0:
-                    continue
-                new_blocks.append(Block(color, y, x))
-
-        return Level(self.walls, frozenset(new_blocks), list_repr)
+        return Level(self.walls, nested_list_to_nested_tuple(list_repr))
 
     def move(self, move: Move) -> Level:
-        assert any(
-            (block.row, block.col) == move.original_position() for block in self.blocks
-        )  # there is a block in the move location
-        assert not self.walls.is_wall(*move.new_position())
-        # not a wall in the new position
-        assert not any(
-            (block.row, block.col) == move.new_position() for block in self.blocks
-        )  # not a block in the new position
-
-        return self._move(move)
+        assert self.tuple_repr[move.col][move.row] == move.color
+        assert self.tuple_repr[move.new_position()[1]][move.new_position()[0]] == 0
+        list_repr = nested_tuple_to_nested_list(self.tuple_repr)
+        return self._move(move, list_repr)
 
     def possible_moves(self) -> list[Move]:
         moves: list[Move] = []
-        blocks_coords = tuple((block.row, block.col) for block in self.blocks)
-
-        def _left_vacant(row, col):
-            if (row, col - 1) in blocks_coords:
-                return False
-            return not self.walls.is_wall(row, col - 1)
-
-        def _right_vacant(row, col):
-            if (row, col + 1) in blocks_coords:
-                return False
-            return not self.walls.is_wall(row, col + 1)
-
-        for block in self.blocks:
-            if _left_vacant(block.row, block.col):
-                moves.append(Move(block.row, block.col, block.color, True))
-            if _right_vacant(block.row, block.col):
-                moves.append(Move(block.row, block.col, block.color, False))
+        for x, col in enumerate(self.tuple_repr[:-1]):
+            for y, cell in enumerate(col):
+                right_cell = self.tuple_repr[x + 1][y]
+                if cell == 0 and right_cell >= 0:
+                    moves.append(Move(y, x + 1, right_cell, True))
+                elif right_cell == 0 and cell >= 0:
+                    moves.append(Move(y, x, cell, False))
         return moves
 
-    def children(self) -> dict[Level]:
-        return {move: self._move(move) for move in self.possible_moves()}
+    def children(self) -> dict[Move, Level]:
+        list_repr = nested_tuple_to_nested_list(self.tuple_repr)
+        return {
+            move: self._move(move, deepcopy(list_repr))
+            for move in self.possible_moves()
+        }
+
+    def _heuristics(self) -> int:
+        blocks_by_color = defaultdict(list[tuple[int, int]])
+        for x, col in enumerate(self.tuple_repr):
+            for y, cell in enumerate(col):
+                if cell <= 0:
+                    continue
+                blocks_by_color[cell].append((x, y))
+
+        if len(blocks_by_color) == 0:
+            return 0
+        h = 0
+        for bs in blocks_by_color.values():
+            n_blocks = len(bs)
+            if n_blocks == 1:
+                return inf
+            if n_blocks <= 3:
+                x_coords = [b[0] for b in bs if b[1] == self.walls.height - 1]
+                if len(x_coords) >= 2 and any(
+                    self.walls.walls[-1][x_coords[0] + 1 : x_coords[-1]]
+                ):
+                    return inf
+            h += color_heuristics(tuple(b[0] for b in bs))
+        return max(h, 1)
 
     def is_win(self):
-        return len(self.blocks) == 0
-
-    def is_deadend(self):
-        """
-        early escape, return true if detected to be impossible
-        returing False does not mean that the level is possible
-        """
-
-        for bs in Block.blocks_by_color(self.blocks).values():
-            # check singleton
-            if len(bs) == 1:
-                return True
-            if len(bs) <= 3:
-                x_coords = [b.col for b in bs if b.row == len(self.walls.walls) - 1]
-                if len(x_coords) < 2:
-                    continue
-                if any(self.walls.walls[-1][min(x_coords) + 1 : max(x_coords)]):
-                    return True
-
-        return False
+        return self.heuristics == 0
 
     def __hash__(self):
-        return hash(self.blocks)
+        return hash(self.tuple_repr)
 
     def __eq__(self, value: Level):
         return hash(self) == hash(value)
@@ -300,8 +219,19 @@ class Level:
     def from_str(
         s: str, wall_char: str = "X", empty_char: str = ".", new_line_char="/"
     ) -> Level:
-        return Level(
-            walls=Walls.from_str(s, wall_char, new_line_char),
-            blocks=Block.from_str(s, wall_char, empty_char, new_line_char),
-            list_repr=None,
-        )
+        walls = Walls.from_str(s, wall_char, new_line_char)
+        assigned_chars = []
+        cols = [[None for _ in range(walls.height)] for _ in range(walls.width)]
+        for i, row in enumerate(s.split(new_line_char)):
+            for j, char in enumerate(row):
+                if char == wall_char:
+                    cols[j][i] = -1
+                    continue
+                elif char == empty_char:
+                    cols[j][i] = 0
+                    continue
+                if char not in assigned_chars:
+                    assigned_chars.append(char)
+                cols[j][i] = assigned_chars.index(char) + 1
+
+        return Level(walls, nested_list_to_nested_tuple(cols))

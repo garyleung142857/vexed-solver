@@ -7,7 +7,7 @@ from vexed import Level
 level_folder = "levels"
 solution_folder = "solutions"
 
-level_fn = "classic_ii_levels.txt"
+level_fn = "confusion_pack.txt"
 
 level_file = os.path.join(level_folder, level_fn)
 solution_fn = level_fn.split(".")[0] + ".csv"
@@ -23,7 +23,7 @@ with (
         level = Level.from_str(level_str)
         print(level, "\n")
         solver = VexedSolver(level)
-        solution = solver.astar(level)
+        solution = solver.astar(level, target_moves)
         if solution is None:
             solution_writer.writerow(
                 [
