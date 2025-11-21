@@ -7,13 +7,13 @@ from math import inf
 
 
 class Walls:
-    __slots__ = ("walls", "width", "height", "empty_columns")
+    __slots__ = ("walls", "width", "height", "empty_columns", "cells_min_dists")
 
     def __init__(self, walls: tuple[tuple[bool]]):
         self.walls = walls
         self.width = len(self.walls[0])
         self.height = len(self.walls)
-        _empty_columns: list[tuple[int, int, int]] = []
+        self.empty_columns: list[tuple[int, int, int]] = []
         for col in range(self.width):
             empty_col_row_start: int = None
             for row in range(self.height + 1):
@@ -21,12 +21,31 @@ class Walls:
                 if is_wall == (empty_col_row_start is None):
                     continue
                 if is_wall:
-                    if row - empty_col_row_start > 1:
-                        _empty_columns.append((col, empty_col_row_start, row))
+                    self.empty_columns.append((col, empty_col_row_start, row))
                     empty_col_row_start = None
                 else:
                     empty_col_row_start = row
-        self.empty_columns = nested_list_to_nested_tuple(_empty_columns)
+        self.cells_min_dists: dict[int, dict[int, int]] = {}
+        # (self_col_idx, self_height), (other_col_idx, other_height)
+        
+        blocks = tuple(
+            (idx, row, empty_col[0])
+            for idx, empty_col in enumerate(self.empty_columns)
+            for row in range(empty_col[1], empty_col[2])
+        )
+
+        for idx_1, b1 in enumerate(blocks):
+            _d = {}
+            for idx_2, b2 in enumerate(blocks):
+                if b1[0] == b2[0]:
+                    _d[idx_2] = 0
+                else:
+                    _d[idx_2] = inf
+            self.cells_min_dists[idx_1] = _d
+
+        updated = True
+        current_distance = 0
+        
 
     def __hash__(self):
         return hash(self.walls)
@@ -95,7 +114,7 @@ def nested_list_to_nested_tuple(list_repr: list[list[int]]) -> tuple[tuple[int]]
 
 
 class Level:
-    __slots__ = ("walls", "list_repr", "tuple_repr", "heuristics")
+    __slots__ = ("walls", "tuple_repr", "heuristics")
 
     def __init__(self, walls: Walls, tuple_repr: tuple[tuple[int]]):
         self.walls = walls

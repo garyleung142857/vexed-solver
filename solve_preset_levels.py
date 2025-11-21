@@ -7,7 +7,7 @@ from vexed import Level
 level_folder = "levels"
 solution_folder = "solutions"
 
-level_fn = "confusion_pack.txt"
+level_fn = "classic_ii_levels.txt"
 
 level_file = os.path.join(level_folder, level_fn)
 solution_fn = level_fn.split(".")[0] + ".csv"

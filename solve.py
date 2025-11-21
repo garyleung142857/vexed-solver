@@ -156,7 +156,8 @@ class VexedSolver:
 if __name__ == "__main__":
     # level_str = ".hf...e./.eab..fh/.XXX..XX/.Xc....X/..b.a.c."
     # level_str = "b.XXXXa.aX/X.Xb..c.dX/X.XX..e.eX/Xb.ed.c.cg/XXXXe.X.ge/XXXXc.X.XX"
-    level_str = "XXXX.gXX/XXXh.XXX/a.eg.e../X.XXXh.a"
+    level_str = ".bXXXa.aX/.Xb..c.dX/.XX..e.eX/b.ed.c.cg/XXXe.X.ge/XXXc.X.XX"
+    # level_str = "XXXX.gXX/XXXh.XXX/a.eg.e../X.XXXh.a"
     level = Level.from_str(level_str)
     print(level)
     level_solver = VexedSolver(level)
